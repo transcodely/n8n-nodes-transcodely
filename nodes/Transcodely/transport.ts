@@ -8,7 +8,12 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 
-import { describeApiError, ERROR_CODE_CONTEXT_KEY, formatApiError } from './errors';
+import {
+	describeApiError,
+	ERROR_CODE_CONTEXT_KEY,
+	formatApiError,
+	STATUS_CODE_CONTEXT_KEY,
+} from './errors';
 import { buildListJobsRequest, rpcUrl, validateBaseUrl } from './requests';
 
 export const CREDENTIALS_NAME = 'transcodelyApi';
@@ -115,6 +120,7 @@ export async function transcodelyApiRequest(
 			},
 		);
 		apiError.context[ERROR_CODE_CONTEXT_KEY] = info.code;
+		apiError.context[STATUS_CODE_CONTEXT_KEY] = info.statusCode;
 		throw apiError;
 	}
 

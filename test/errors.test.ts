@@ -3,7 +3,15 @@ import { describe, it } from 'node:test';
 import type { INode } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 
-import { asNodeError, describeApiError, formatApiError } from '../nodes/Transcodely/errors';
+import {
+	asNodeError,
+	describeApiError,
+	ERROR_CODE_CONTEXT_KEY,
+	formatApiError,
+	isApiErrorCode,
+	isNotFoundApiError,
+	STATUS_CODE_CONTEXT_KEY,
+} from '../nodes/Transcodely/errors';
 
 const NODE = {
 	id: 'n1',
@@ -74,6 +82,48 @@ describe('describeApiError', () => {
 			statusCode: 429,
 		});
 		assert.equal(line, 'Transcodely API error [limit_exceeded]: spend limit reached');
+	});
+});
+
+describe('isNotFoundApiError', () => {
+	function apiError(code: string, statusCode: number): NodeApiError {
+		const error = new NodeApiError(NODE, { code, message: 'nope' });
+		error.context[ERROR_CODE_CONTEXT_KEY] = code;
+		error.context[STATUS_CODE_CONTEXT_KEY] = statusCode;
+		return error;
+	}
+
+	it('recognizes the per-entity code the API really sends for a missing endpoint', () => {
+		assert.equal(isNotFoundApiError(apiError('webhook_endpoint_not_found', 404)), true);
+	});
+
+	it('recognizes the generic spellings too', () => {
+		assert.equal(isNotFoundApiError(apiError('not_found', 404)), true);
+		assert.equal(isNotFoundApiError(apiError('resource_not_found', 404)), true);
+	});
+
+	it('falls back to the HTTP status for a discriminator it has never seen', () => {
+		assert.equal(isNotFoundApiError(apiError('some_future_code', 404)), true);
+	});
+
+	it('does not mistake a transient failure for a missing resource', () => {
+		assert.equal(isNotFoundApiError(apiError('unavailable', 503)), false);
+		assert.equal(isNotFoundApiError(apiError('permission_denied', 403)), false);
+		assert.equal(isNotFoundApiError(apiError('internal', 500)), false);
+	});
+
+	it('is false for anything that is not a Transcodely API error', () => {
+		assert.equal(isNotFoundApiError(new Error('socket hang up')), false);
+		assert.equal(isNotFoundApiError(new NodeOperationError(NODE, 'bad config')), false);
+		assert.equal(isNotFoundApiError(undefined), false);
+	});
+
+	it('isApiErrorCode still matches one exact code', () => {
+		assert.equal(
+			isApiErrorCode(apiError('webhook_endpoint_not_found', 404), 'webhook_endpoint_not_found'),
+			true,
+		);
+		assert.equal(isApiErrorCode(apiError('webhook_endpoint_not_found', 404), 'not_found'), false);
 	});
 });
 

@@ -8,7 +8,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-import { asNodeError, isApiErrorCode } from './errors';
+import { asNodeError, isNotFoundApiError } from './errors';
 import {
 	buildCreateWebhookEndpointRequest,
 	normalizeEventSelection,
@@ -137,7 +137,7 @@ export class TranscodelyTrigger implements INodeType {
 					// leave the first endpoint live on this URL, still delivering
 					// under the old secret, which this node would then answer 401 to
 					// for the whole three-day retry curve.
-					if (isApiErrorCode(error, 'not_found') || isApiErrorCode(error, 'resource_not_found')) {
+					if (isNotFoundApiError(error)) {
 						this.logger.debug(
 							`Transcodely Trigger: endpoint ${endpointId} no longer exists, registering a new one`,
 						);
@@ -181,8 +181,12 @@ export class TranscodelyTrigger implements INodeType {
 				const staticData = this.getWorkflowStaticData('node');
 
 				// A stored id here means a previous registration was never cleaned
-				// up. Remove it first so this URL never ends up with two live
-				// endpoints signing with two different secrets.
+				// up. Removing it first closes the common case where this URL would
+				// otherwise end up with two live endpoints signing under two
+				// different secrets. It is best-effort, not a guarantee: if the
+				// delete is refused we log and register anyway, because refusing to
+				// activate over a leftover id would be the worse failure. The
+				// warning names the endpoint so it can be removed by hand.
 				const staleId = typeof staticData.webhookId === 'string' ? staticData.webhookId : '';
 				if (staleId !== '') {
 					try {
@@ -262,7 +266,7 @@ export class TranscodelyTrigger implements INodeType {
 					// we just removed, so its id is cleared too. Any other refusal
 					// keeps the id: the endpoint is still live, and forgetting it
 					// here would orphan it beyond the reach of the next deactivation.
-					if (isApiErrorCode(error, 'not_found') || isApiErrorCode(error, 'resource_not_found')) {
+					if (isNotFoundApiError(error)) {
 						this.logger.debug(`Transcodely Trigger: endpoint ${endpointId} was already gone`);
 					} else {
 						this.logger.warn(

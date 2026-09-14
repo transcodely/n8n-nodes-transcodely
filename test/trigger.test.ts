@@ -13,6 +13,20 @@ const methods = trigger.webhookMethods.default;
 const SECRET = 'whsec_hq7Wm2hVQeWnpYQmKQwq0k0wq9tQ0bJf5wZ4Yb0Qm1c';
 const WEBHOOK_URL = 'https://n8n.example.com/webhook/abc';
 
+/**
+ * What the API really answers for an unknown, wrong-app or already-deleted
+ * endpoint: Connect NotFound, so HTTP 404 and a body code of `not_found`, with
+ * `MapError` stamping the per-entity discriminator on the `error-code` header.
+ * `describeApiError` prefers that header, so the node sees
+ * `webhook_endpoint_not_found` — never the bare `not_found` a hand-written
+ * fixture reaches for.
+ */
+const ENDPOINT_GONE = {
+	statusCode: 404,
+	headers: { 'error-code': 'webhook_endpoint_not_found' },
+	body: { code: 'not_found', message: 'webhook endpoint not found' },
+};
+
 function hookContext(options: MockContextOptions) {
 	return makeContext(options) as unknown as IHookFunctions & {
 		calls: ReturnType<typeof makeContext>['calls'];
@@ -97,6 +111,39 @@ describe('trigger create', () => {
 		assert.deepEqual((context.calls[0].options.body as IDataObject).enabled_events, ['*']);
 	});
 
+	it('re-activates after the customer deleted the endpoint in the dashboard', async () => {
+		// The whole point of checkExists returning false: n8n then calls create,
+		// and the workflow comes back. Both legs see the real not-found shape.
+		const checkContext = hookContext({
+			params,
+			staticData: { webhookId: 'whe_deleted12345', webhookSecret: 'whsec_lost' },
+			responses: [ENDPOINT_GONE],
+		});
+		assert.equal(await methods.checkExists.call(checkContext), false);
+
+		const createContext = hookContext({
+			params,
+			staticData: checkContext.staticData,
+			credentials: { apiKey: 'ak_test_key', appId: 'app_k1l2m3n4o5' },
+			responses: [
+				ENDPOINT_GONE,
+				{
+					body: {
+						endpoint: {
+							id: 'whe_a1b2c3d4e5f6',
+							secret: SECRET,
+							url: WEBHOOK_URL,
+							status: 'enabled',
+						},
+					},
+				},
+			],
+		});
+		assert.equal(await methods.create.call(createContext), true);
+		assert.equal(createContext.staticData.webhookId, 'whe_a1b2c3d4e5f6');
+		assert.equal(createContext.staticData.webhookSecret, SECRET);
+	});
+
 	it('removes a stale endpoint before registering a replacement', async () => {
 		const context = hookContext({
 			params,
@@ -176,12 +223,40 @@ describe('trigger checkExists', () => {
 	it('reports false and logs when the endpoint is genuinely gone', async () => {
 		const context = hookContext({
 			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
-			responses: [
-				{ statusCode: 404, body: { code: 'not_found', message: 'webhook endpoint not found' } },
-			],
+			responses: [ENDPOINT_GONE],
 		});
 		assert.equal(await methods.checkExists.call(context), false);
 		assert.ok(context.logs.some((line) => line.startsWith('debug:')));
+	});
+
+	it('also recognizes a bare not_found discriminator', async () => {
+		const context = hookContext({
+			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
+			responses: [
+				{
+					statusCode: 404,
+					headers: { 'error-code': 'not_found' },
+					body: { code: 'not_found', message: 'webhook endpoint not found' },
+				},
+			],
+		});
+		assert.equal(await methods.checkExists.call(context), false);
+	});
+
+	it('treats an unfamiliar discriminator on a 404 as gone', async () => {
+		// A wire code this node has never seen must not read as transient when
+		// the status already says the endpoint is not there.
+		const context = hookContext({
+			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
+			responses: [
+				{
+					statusCode: 404,
+					headers: { 'error-code': 'some_future_not_found_code' },
+					body: { code: 'not_found', message: 'gone' },
+				},
+			],
+		});
+		assert.equal(await methods.checkExists.call(context), false);
 	});
 
 	it('raises rather than reporting false when the read fails transiently', async () => {
@@ -228,9 +303,7 @@ describe('trigger delete', () => {
 	it('clears state when the endpoint was already gone', async () => {
 		const context = hookContext({
 			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
-			responses: [
-				{ statusCode: 404, body: { code: 'not_found', message: 'webhook endpoint not found' } },
-			],
+			responses: [ENDPOINT_GONE],
 		});
 		assert.equal(await methods.delete.call(context), true);
 		assert.equal(context.staticData.webhookId, undefined);

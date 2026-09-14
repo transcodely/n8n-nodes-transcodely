@@ -85,12 +85,49 @@ export function describeApiError(
  */
 export const ERROR_CODE_CONTEXT_KEY = 'transcodelyErrorCode';
 
+/** Key under which the HTTP status of a refused request is stamped. */
+export const STATUS_CODE_CONTEXT_KEY = 'transcodelyStatusCode';
+
 /** True when `error` is a Transcodely API error carrying exactly this code. */
 export function isApiErrorCode(error: unknown, code: string): boolean {
 	if (!(error instanceof NodeApiError)) {
 		return false;
 	}
 	return error.context?.[ERROR_CODE_CONTEXT_KEY] === code;
+}
+
+/**
+ * Wire codes that all mean "the thing you named does not exist".
+ *
+ * The API stamps a per-entity discriminator on the `error-code` header and
+ * `describeApiError` prefers it over the Connect code in the body, so a missing
+ * webhook endpoint arrives as `webhook_endpoint_not_found` rather than the
+ * generic `not_found`. Matching only the generic spelling would turn the most
+ * ordinary case — somebody deleted the endpoint in the dashboard — into an
+ * error the node treats as transient.
+ */
+const NOT_FOUND_CODES = new Set([
+	'webhook_endpoint_not_found',
+	'not_found',
+	'resource_not_found',
+]);
+
+/**
+ * True when the API's answer means the addressed resource is gone.
+ *
+ * Either signal is enough: a not-found wire code, or HTTP 404. Keeping both
+ * means a discriminator this node has never seen still reads as not-found
+ * instead of being mistaken for a transient failure.
+ */
+export function isNotFoundApiError(error: unknown): boolean {
+	if (!(error instanceof NodeApiError)) {
+		return false;
+	}
+	const code = error.context?.[ERROR_CODE_CONTEXT_KEY];
+	if (typeof code === 'string' && NOT_FOUND_CODES.has(code)) {
+		return true;
+	}
+	return error.context?.[STATUS_CODE_CONTEXT_KEY] === 404;
 }
 
 /** One-line summary suitable for a node error title. */

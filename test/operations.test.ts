@@ -105,6 +105,26 @@ describe('Job: Create', () => {
 		);
 	});
 
+	it('stamps the API code and HTTP status onto the error context', async () => {
+		await assert.rejects(
+			run({
+				params,
+				responses: [
+					{
+						statusCode: 404,
+						headers: { 'error-code': 'origin_not_found' },
+						body: { code: 'not_found', message: 'origin not found' },
+					},
+				],
+			}),
+			(error: Error & { context?: Record<string, unknown> }) => {
+				assert.equal(error.context?.transcodelyErrorCode, 'origin_not_found');
+				assert.equal(error.context?.transcodelyStatusCode, 404);
+				return true;
+			},
+		);
+	});
+
 	it('surfaces the API error code and message, not the raw body', async () => {
 		await assert.rejects(
 			run({

@@ -114,7 +114,9 @@ Every delivery is verified before the workflow runs:
 
 Both signatures sent during Transcodely's 24-hour secret-rotation overlap are accepted, so a rotation does not drop events.
 
-**Deliveries are at-least-once, and the node does not deduplicate them.** Transcodely can resend an event after a crash or a manual replay, and a delivery captured inside the replay window verifies again. Every delivery carries a unique `webhook-id` header and the same id as `id` in the body, so make the workflow idempotent on it — key whatever you write downstream on that id rather than assuming one event runs the workflow once.
+**Deliveries are at-least-once, and the node does not deduplicate them.** Transcodely can resend an event after a crash or a manual replay, and a delivery captured inside the replay window verifies again. Every delivery carries a unique `webhook-id` header and the same id as `id` in the body, so make the workflow idempotent on it — key whatever you write downstream on that id rather than assuming one event runs the workflow once. The node deliberately keeps no record of seen ids: deduplicating inside a trigger would mean per-workflow state that grows without bound and still misses a second n8n instance.
+
+Activating a workflow whose stored endpoint is missing re-registers it, so deleting the endpoint in the Transcodely dashboard is recoverable. If a stored endpoint is left behind from an earlier activation the node deletes it before registering a replacement; when that delete is refused it logs a warning naming the endpoint and registers anyway, so an orphan can survive and should be removed in the dashboard.
 
 Subscribe to any of the 18 event types, or to `*` for all of them: `job.created`, `job.succeeded`, `job.failed`, `job.canceled`, `job.progress`, `output.created`, `output.ready`, `output.failed`, `output.progress`, `video.uploaded`, `video.ready`, `video.failed`, `video.deleted`, `video.source_scheduled_for_deletion`, `app.created`, `app.updated`, `app.spend_limit_warning`, `app.spend_limit_exceeded`.
 
