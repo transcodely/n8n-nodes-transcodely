@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Transcodely">
+  <rect width="64" height="64" rx="14" fill="#A99BFF"/>
+  <path d="M16 18h32v7H36.5v21h-9V25H16z" fill="#14121F"/>
+  <path d="M40.5 32.5l10 5.75-10 5.75z" fill="#14121F"/>
+</svg>

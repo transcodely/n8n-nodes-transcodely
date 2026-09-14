@@ -1,0 +1,67 @@
+{
+	"name": "n8n-nodes-transcodely",
+	"version": "0.1.0",
+	"description": "n8n community node for Transcodely — video transcoding and hosting",
+	"license": "MIT",
+	"homepage": "https://github.com/transcodely/n8n-nodes-transcodely#readme",
+	"keywords": [
+		"n8n-community-node-package",
+		"n8n",
+		"transcodely",
+		"video",
+		"transcoding",
+		"hls",
+		"encoding"
+	],
+	"author": {
+		"name": "Transcodely",
+		"email": "support@transcodely.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/transcodely/n8n-nodes-transcodely.git"
+	},
+	"bugs": {
+		"url": "https://github.com/transcodely/n8n-nodes-transcodely/issues"
+	},
+	"engines": {
+		"node": ">=20.15"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"scan": "node scripts/scan-source.mjs",
+		"test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": false,
+		"credentials": [
+			"dist/credentials/TranscodelyApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/Transcodely/Transcodely.node.js",
+			"dist/nodes/Transcodely/TranscodelyTrigger.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "^0.47.2",
+		"@n8n/scan-community-package": "^0.35.0",
+		"@types/node": "^22.10.0",
+		"eslint": "9.32.0",
+		"n8n-workflow": "*",
+		"prettier": "3.6.2",
+		"typescript": "5.9.2"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}

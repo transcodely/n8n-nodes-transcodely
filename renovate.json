@@ -1,0 +1,21 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 5am on the first day of the month"],
+  "timezone": "Europe/Berlin",
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 3,
+  "packageRules": [
+    {
+      "description": "The n8n toolchain moves weekly; batch it into one monthly PR.",
+      "matchPackageNames": ["@n8n/node-cli", "@n8n/scan-community-package", "n8n-workflow"],
+      "groupName": "n8n toolchain"
+    },
+    {
+      "description": "n8n-workflow is a peer dependency; never widen the range automatically.",
+      "matchPackageNames": ["n8n-workflow"],
+      "matchDepTypes": ["peerDependencies"],
+      "enabled": false
+    }
+  ]
+}

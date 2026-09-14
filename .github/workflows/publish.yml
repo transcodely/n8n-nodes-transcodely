@@ -1,0 +1,56 @@
+# Publishes n8n-nodes-transcodely to npm on every version tag push.
+#
+# Since 2026-05-01 n8n requires community nodes to be published through a GitHub
+# Action carrying an npm provenance statement. This workflow satisfies that.
+#
+# ONE-TIME SETUP (founder):
+#   Option A, recommended — OIDC Trusted Publishing, no long-lived secret:
+#     npmjs.com -> package settings -> Publish access -> Trusted Publishers ->
+#     Add a publisher -> GitHub Actions, owner "transcodely",
+#     repository "n8n-nodes-transcodely", workflow "publish.yml", no environment.
+#     Leave NPM_TOKEN unset.
+#   Option B — npm granular access token with publish rights on this package,
+#     stored as the NPM_TOKEN repository secret.
+#
+# RELEASE: run `npm run release` locally. It lints, builds, prompts for the
+# version bump, updates the changelog, commits, tags and pushes the tag, which
+# is what triggers this workflow.
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Required to mint an OIDC token for the npm provenance attestation.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Release
+        run: |
+          [ -n "$NPM_TOKEN" ] && npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          npm run release
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
