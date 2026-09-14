@@ -76,6 +76,56 @@ describe('trigger create', () => {
 		assert.equal(context.calls.length, 0);
 	});
 
+	it('collapses a wildcard selection before registering', async () => {
+		const context = hookContext({
+			params: { events: ['*', 'job.succeeded'], options: {} },
+			credentials: { apiKey: 'ak_test_key', appId: 'app_k1l2m3n4o5' },
+			responses: [
+				{
+					body: {
+						endpoint: {
+							id: 'whe_a1b2c3d4e5f6',
+							secret: SECRET,
+							url: WEBHOOK_URL,
+							status: 'enabled',
+						},
+					},
+				},
+			],
+		});
+		await methods.create.call(context);
+		assert.deepEqual((context.calls[0].options.body as IDataObject).enabled_events, ['*']);
+	});
+
+	it('removes a stale endpoint before registering a replacement', async () => {
+		const context = hookContext({
+			params,
+			staticData: { webhookId: 'whe_stale1234567', webhookSecret: 'whsec_stale' },
+			credentials: { apiKey: 'ak_test_key', appId: 'app_k1l2m3n4o5' },
+			responses: [
+				{ body: {} },
+				{
+					body: {
+						endpoint: {
+							id: 'whe_a1b2c3d4e5f6',
+							secret: SECRET,
+							url: WEBHOOK_URL,
+							status: 'enabled',
+						},
+					},
+				},
+			],
+		});
+
+		await methods.create.call(context);
+
+		assert.equal(procedureOf(context.calls[0]), 'WebhookService/DeleteWebhookEndpoint');
+		assert.deepEqual(context.calls[0].options.body, { id: 'whe_stale1234567' });
+		assert.equal(procedureOf(context.calls[1]), 'WebhookService/CreateWebhookEndpoint');
+		assert.equal(context.staticData.webhookId, 'whe_a1b2c3d4e5f6');
+		assert.equal(context.staticData.webhookSecret, SECRET);
+	});
+
 	it('refuses to arm the trigger when no signing secret comes back', async () => {
 		const context = hookContext({
 			params,
@@ -123,7 +173,7 @@ describe('trigger checkExists', () => {
 		assert.equal(await methods.checkExists.call(context), false);
 	});
 
-	it('reports false and logs when the endpoint is gone', async () => {
+	it('reports false and logs when the endpoint is genuinely gone', async () => {
 		const context = hookContext({
 			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
 			responses: [
@@ -132,6 +182,19 @@ describe('trigger checkExists', () => {
 		});
 		assert.equal(await methods.checkExists.call(context), false);
 		assert.ok(context.logs.some((line) => line.startsWith('debug:')));
+	});
+
+	it('raises rather than reporting false when the read fails transiently', async () => {
+		// Reporting false here would make create() register a SECOND endpoint on
+		// the same URL. The first would stay enabled, keep delivering under the
+		// old secret, and every one of those deliveries would be answered 401
+		// for the whole three-day retry curve.
+		const context = hookContext({
+			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
+			responses: [{ statusCode: 503, body: { code: 'unavailable', message: 'try again shortly' } }],
+		});
+		await assert.rejects(methods.checkExists.call(context), /try again shortly/);
+		assert.ok(context.logs.some((line) => line.startsWith('warn:')));
 	});
 });
 
@@ -147,7 +210,9 @@ describe('trigger delete', () => {
 		assert.equal(context.staticData.webhookSecret, undefined);
 	});
 
-	it('clears local state and warns when the delete is refused', async () => {
+	it('keeps the endpoint ID and warns when the delete is refused', async () => {
+		// Forgetting the id here would orphan a live endpoint that no later
+		// deactivation could reach.
 		const context = hookContext({
 			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
 			responses: [
@@ -156,6 +221,19 @@ describe('trigger delete', () => {
 		});
 		assert.equal(await methods.delete.call(context), false);
 		assert.ok(context.logs.some((line) => line.startsWith('warn:')));
+		assert.equal(context.staticData.webhookId, 'whe_a1b2c3d4e5f6');
+		assert.equal(context.staticData.webhookSecret, SECRET);
+	});
+
+	it('clears state when the endpoint was already gone', async () => {
+		const context = hookContext({
+			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
+			responses: [
+				{ statusCode: 404, body: { code: 'not_found', message: 'webhook endpoint not found' } },
+			],
+		});
+		assert.equal(await methods.delete.call(context), true);
+		assert.equal(context.staticData.webhookId, undefined);
 		assert.equal(context.staticData.webhookSecret, undefined);
 	});
 
@@ -191,6 +269,21 @@ describe('trigger webhook handler', () => {
 
 		assert.deepEqual(result.workflowData?.[0][0].json, event);
 		assert.equal(context.responseStatus, null);
+	});
+
+	it('names the rejected event id in the log so a delivery can be traced', async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const context = makeContext({
+			staticData: { webhookId: 'whe_a1b2c3d4e5f6', webhookSecret: SECRET },
+			headers: signedHeaders(now, 'whsec_an_entirely_different_secret_value'),
+			body: event,
+			rawBody,
+			params: { options: {} },
+		});
+
+		await trigger.webhook.call(context as unknown as IWebhookFunctions);
+
+		assert.ok(context.logs.some((line) => line.includes(event.id)));
 	});
 
 	it('answers 401 when the signature does not match', async () => {

@@ -3,6 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
 	backoffDelayMs,
+	nextPollDelayMs,
+	normalizeEventSelection,
+	validateBaseUrl,
 	buildCreateJobRequest,
 	buildCreateVideoFromUrlRequest,
 	buildCreateWebhookEndpointRequest,
@@ -31,6 +34,57 @@ describe('normalizeBaseUrl and rpcUrl', () => {
 			rpcUrl('https://api.transcodely.com/', 'JobService', 'Create'),
 			'https://api.transcodely.com/transcodely.v1.JobService/Create',
 		);
+	});
+});
+
+describe('validateBaseUrl', () => {
+	it('accepts an empty value and falls back to the public host', () => {
+		assert.deepEqual(validateBaseUrl(''), { ok: true, baseUrl: 'https://api.transcodely.com' });
+		assert.deepEqual(validateBaseUrl(undefined), {
+			ok: true,
+			baseUrl: 'https://api.transcodely.com',
+		});
+	});
+
+	it('accepts an https host and strips its trailing slash', () => {
+		assert.deepEqual(validateBaseUrl('https://staging.transcodely.test/'), {
+			ok: true,
+			baseUrl: 'https://staging.transcodely.test',
+		});
+	});
+
+	it('refuses plaintext http so the API key is never sent in the clear', () => {
+		const result = validateBaseUrl('http://api.transcodely.com');
+		assert.equal(result.ok, false);
+		assert.match(result.ok === false ? result.reason : '', /https:\/\//);
+	});
+
+	it('refuses a base URL carrying a path', () => {
+		const result = validateBaseUrl('https://evil.example.com/api.transcodely.com');
+		assert.equal(result.ok, false);
+		assert.match(result.ok === false ? result.reason : '', /no path/);
+	});
+
+	it('refuses a query string or fragment', () => {
+		assert.equal(validateBaseUrl('https://api.transcodely.com?x=1').ok, false);
+		assert.equal(validateBaseUrl('https://api.transcodely.com#x').ok, false);
+	});
+
+	it('refuses a value that is not a URL at all', () => {
+		assert.equal(validateBaseUrl('https://').ok, false);
+	});
+});
+
+describe('normalizeEventSelection', () => {
+	it('collapses a selection containing the wildcard to the wildcard alone', () => {
+		assert.deepEqual(normalizeEventSelection(['job.succeeded', '*', 'video.ready']), ['*']);
+	});
+
+	it('drops blanks and duplicates otherwise', () => {
+		assert.deepEqual(normalizeEventSelection(['job.failed', ' ', 'job.failed', 'video.ready']), [
+			'job.failed',
+			'video.ready',
+		]);
 	});
 });
 
@@ -232,6 +286,15 @@ describe('buildListJobsRequest', () => {
 });
 
 describe('buildCreateWebhookEndpointRequest', () => {
+	it('collapses a wildcard selection before sending it', () => {
+		const body = buildCreateWebhookEndpointRequest({
+			appId: 'app_k1l2m3n4o5',
+			url: 'https://n8n.example.com/webhook/abc',
+			events: ['*', 'job.succeeded'],
+		});
+		assert.deepEqual(body.enabled_events, ['*']);
+	});
+
 	it('sends the app, URL and subscribed events', () => {
 		const body = buildCreateWebhookEndpointRequest({
 			appId: 'app_k1l2m3n4o5',
@@ -272,6 +335,18 @@ describe('catalog and polling helpers', () => {
 		for (const status of ['pending', 'probing', 'processing', 'leased', '']) {
 			assert.equal(isTerminalJobStatus(status), false, status);
 		}
+	});
+
+	it('shortens the last poll so it lands on the deadline', () => {
+		assert.equal(nextPollDelayMs(0, 60000), 2000);
+		assert.equal(nextPollDelayMs(0, 500), 500);
+		assert.equal(nextPollDelayMs(9, 1200), 1200);
+	});
+
+	it('reports a timeout only when no time is left', () => {
+		assert.equal(nextPollDelayMs(0, 0), null);
+		assert.equal(nextPollDelayMs(0, -1), null);
+		assert.equal(nextPollDelayMs(0, 1), 1);
 	});
 
 	it('backs off exponentially and then holds at the cap', () => {

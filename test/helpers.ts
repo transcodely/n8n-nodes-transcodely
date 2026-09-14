@@ -1,4 +1,4 @@
-import type { IDataObject, IHttpRequestOptions, INode } from 'n8n-workflow';
+import type { IDataObject, IHttpRequestOptions, INode, INodeExecutionData } from 'n8n-workflow';
 
 export interface MockResponse {
 	statusCode?: number;
@@ -24,7 +24,7 @@ export interface MockContextOptions {
 	params?: Record<string, unknown>;
 	responses?: MockResponse[];
 	credentials?: { apiKey: string; baseUrl?: string; appId?: string };
-	items?: IDataObject[];
+	items?: INodeExecutionData[];
 	continueOnFail?: boolean;
 	staticData?: IDataObject;
 	headers?: Record<string, string>;

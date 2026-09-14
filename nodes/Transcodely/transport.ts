@@ -8,8 +8,8 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 
-import { describeApiError, formatApiError } from './errors';
-import { buildListJobsRequest, normalizeBaseUrl, rpcUrl } from './requests';
+import { describeApiError, ERROR_CODE_CONTEXT_KEY, formatApiError } from './errors';
+import { buildListJobsRequest, rpcUrl, validateBaseUrl } from './requests';
 
 export const CREDENTIALS_NAME = 'transcodelyApi';
 
@@ -26,21 +26,44 @@ export type TranscodelyContext =
 	| ILoadOptionsFunctions
 	| IWebhookFunctions;
 
+/**
+ * Per-execution memo for the resolved app, so a batch of input items costs one
+ * discovery lookup rather than one per item.
+ */
+export interface AppIdCache {
+	appId?: string;
+}
+
 interface TranscodelyCredentials {
 	apiKey: string;
 	baseUrl?: string;
 	appId?: string;
 }
 
-/** Reads the node's credential, with the base URL already normalized. */
+/**
+ * Reads the node's credential, with the base URL validated before anything is
+ * sent to it. An unusable base URL is a configuration error, not an API error.
+ */
 export async function getTranscodelyCredentials(
 	context: TranscodelyContext,
 ): Promise<{ baseUrl: string; appId: string }> {
 	const credentials = (await context.getCredentials(
 		CREDENTIALS_NAME,
 	)) as unknown as TranscodelyCredentials;
+
+	const checked = validateBaseUrl(credentials?.baseUrl);
+	if (!checked.ok) {
+		throw new NodeOperationError(
+			context.getNode(),
+			'The Base URL on the Transcodely credential cannot be used',
+			{
+				description: `It was rejected because ${checked.reason}. Leave the field empty to use https://api.transcodely.com.`,
+			},
+		);
+	}
+
 	return {
-		baseUrl: normalizeBaseUrl(credentials?.baseUrl),
+		baseUrl: checked.baseUrl,
 		appId: (credentials?.appId ?? '').trim(),
 	};
 }
@@ -81,7 +104,7 @@ export async function transcodelyApiRequest(
 
 	if (response.statusCode >= 400) {
 		const info = describeApiError(response.statusCode, response.headers, response.body);
-		throw new NodeApiError(
+		const apiError = new NodeApiError(
 			context.getNode(),
 			{ code: info.code, message: info.message } as JsonObject,
 			{
@@ -91,6 +114,8 @@ export async function transcodelyApiRequest(
 				itemIndex: options.itemIndex,
 			},
 		);
+		apiError.context[ERROR_CODE_CONTEXT_KEY] = info.code;
+		throw apiError;
 	}
 
 	return (response.body ?? {}) as IDataObject;
@@ -107,10 +132,18 @@ export async function transcodelyApiRequest(
  */
 export async function resolveAppId(
 	context: TranscodelyContext,
-	options: { itemIndex?: number } = {},
+	options: { itemIndex?: number; cache?: AppIdCache } = {},
 ): Promise<string> {
+	const cached = options.cache?.appId;
+	if (cached !== undefined) {
+		return cached;
+	}
+
 	const { baseUrl, appId } = await getTranscodelyCredentials(context);
 	if (appId !== '') {
+		if (options.cache) {
+			options.cache.appId = appId;
+		}
 		return appId;
 	}
 
@@ -125,6 +158,9 @@ export async function resolveAppId(
 	const jobs = Array.isArray(response.jobs) ? (response.jobs as IDataObject[]) : [];
 	const discovered = typeof jobs[0]?.app_id === 'string' ? (jobs[0].app_id as string) : '';
 	if (discovered !== '') {
+		if (options.cache) {
+			options.cache.appId = discovered;
+		}
 		return discovered;
 	}
 

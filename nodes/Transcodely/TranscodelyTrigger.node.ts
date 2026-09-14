@@ -8,10 +8,16 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-import { buildCreateWebhookEndpointRequest, WEBHOOK_EVENT_TYPES } from './requests';
+import { asNodeError, isApiErrorCode } from './errors';
+import {
+	buildCreateWebhookEndpointRequest,
+	normalizeEventSelection,
+	WEBHOOK_EVENT_TYPES,
+} from './requests';
 import {
 	DEFAULT_TOLERANCE_SECONDS,
 	describeSignatureFailure,
+	EVENT_ID_HEADER,
 	SIGNATURE_HEADER,
 	verifySignature,
 } from './signature';
@@ -126,10 +132,21 @@ export class TranscodelyTrigger implements INodeType {
 					const endpoint = (response.endpoint ?? {}) as IDataObject;
 					return endpoint.url === webhookUrl && endpoint.status === 'enabled';
 				} catch (error) {
-					this.logger.debug(
-						`Transcodely Trigger: stored endpoint ${endpointId} is unusable, registering a new one (${(error as Error).message})`,
+					// Only a definitive "it is gone" answer may lead to registering a
+					// replacement. Treating a transient failure the same way would
+					// leave the first endpoint live on this URL, still delivering
+					// under the old secret, which this node would then answer 401 to
+					// for the whole three-day retry curve.
+					if (isApiErrorCode(error, 'not_found') || isApiErrorCode(error, 'resource_not_found')) {
+						this.logger.debug(
+							`Transcodely Trigger: endpoint ${endpointId} no longer exists, registering a new one`,
+						);
+						return false;
+					}
+					this.logger.warn(
+						`Transcodely Trigger: could not read endpoint ${endpointId} (${(error as Error).message})`,
 					);
-					return false;
+					throw asNodeError(this.getNode(), error);
 				}
 			},
 
@@ -158,9 +175,34 @@ export class TranscodelyTrigger implements INodeType {
 					);
 				}
 
-				const events = this.getNodeParameter('events') as string[];
+				const events = normalizeEventSelection(this.getNodeParameter('events') as string[]);
 				const options = this.getNodeParameter('options', {}) as IDataObject;
 				const { baseUrl } = await getTranscodelyCredentials(this);
+				const staticData = this.getWorkflowStaticData('node');
+
+				// A stored id here means a previous registration was never cleaned
+				// up. Remove it first so this URL never ends up with two live
+				// endpoints signing with two different secrets.
+				const staleId = typeof staticData.webhookId === 'string' ? staticData.webhookId : '';
+				if (staleId !== '') {
+					try {
+						await transcodelyApiRequest(
+							this,
+							'WebhookService',
+							'DeleteWebhookEndpoint',
+							{ id: staleId },
+							{ baseUrl },
+						);
+					} catch (error) {
+						this.logger.warn(
+							`Transcodely Trigger: could not remove the previous endpoint ${staleId}, delete it in the Transcodely dashboard (${(error as Error).message})`,
+						);
+					}
+					delete staticData.webhookId;
+					delete staticData.webhookSecret;
+					delete staticData.webhookEvents;
+				}
+
 				const appId = await resolveAppId(this);
 
 				const response = await transcodelyApiRequest(
@@ -193,7 +235,6 @@ export class TranscodelyTrigger implements INodeType {
 					);
 				}
 
-				const staticData = this.getWorkflowStaticData('node');
 				staticData.webhookId = endpointId;
 				staticData.webhookSecret = secret;
 				staticData.webhookEvents = events;
@@ -217,16 +258,23 @@ export class TranscodelyTrigger implements INodeType {
 						{ baseUrl },
 					);
 				} catch (error) {
-					this.logger.warn(
-						`Transcodely Trigger: could not delete endpoint ${endpointId}, remove it in the Transcodely dashboard (${(error as Error).message})`,
-					);
-					return false;
-				} finally {
-					delete staticData.webhookId;
-					delete staticData.webhookSecret;
-					delete staticData.webhookEvents;
+					// An endpoint the API says is already gone is as deleted as one
+					// we just removed, so its id is cleared too. Any other refusal
+					// keeps the id: the endpoint is still live, and forgetting it
+					// here would orphan it beyond the reach of the next deactivation.
+					if (isApiErrorCode(error, 'not_found') || isApiErrorCode(error, 'resource_not_found')) {
+						this.logger.debug(`Transcodely Trigger: endpoint ${endpointId} was already gone`);
+					} else {
+						this.logger.warn(
+							`Transcodely Trigger: could not delete endpoint ${endpointId}, it stays registered and will be retried on the next deactivation (${(error as Error).message})`,
+						);
+						return false;
+					}
 				}
 
+				delete staticData.webhookId;
+				delete staticData.webhookSecret;
+				delete staticData.webhookEvents;
 				return true;
 			},
 		},
@@ -267,8 +315,9 @@ export class TranscodelyTrigger implements INodeType {
 		});
 
 		if (!verification.valid) {
+			const eventId = headers[EVENT_ID_HEADER];
 			this.logger.warn(
-				`Transcodely Trigger: rejected a delivery. ${describeSignatureFailure(verification.reason)}`,
+				`Transcodely Trigger: rejected delivery ${typeof eventId === 'string' ? eventId : 'without an event id'}. ${describeSignatureFailure(verification.reason)}`,
 			);
 			response.status(401).send('signature could not be verified');
 			return { noWebhookResponse: true };

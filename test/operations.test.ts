@@ -136,6 +136,73 @@ describe('Job: Create', () => {
 	});
 });
 
+describe('Credential base URL', () => {
+	const params = {
+		resource: 'job',
+		operation: 'get',
+		jobId: 'job_a1b2c3d4e5f6',
+	};
+
+	it('refuses a plaintext base URL before any request is made', async () => {
+		const context = makeContext({
+			params,
+			credentials: { apiKey: 'ak_test_key', baseUrl: 'http://api.transcodely.com' },
+			responses: [],
+		});
+		await assert.rejects(
+			node.execute.call(context as unknown as IExecuteFunctions),
+			/Base URL on the Transcodely credential/,
+		);
+		assert.equal(context.calls.length, 0);
+	});
+
+	it('refuses a base URL carrying a path before any request is made', async () => {
+		const context = makeContext({
+			params,
+			credentials: { apiKey: 'ak_test_key', baseUrl: 'https://evil.example.com/api' },
+			responses: [],
+		});
+		await assert.rejects(
+			node.execute.call(context as unknown as IExecuteFunctions),
+			(error: Error & { description?: string }) => {
+				assert.match(error.message, /Base URL on the Transcodely credential/);
+				assert.match(error.description ?? '', /no path/);
+				return true;
+			},
+		);
+		assert.equal(context.calls.length, 0);
+	});
+});
+
+describe('Secret handling', () => {
+	it('keeps the API key out of every request the node builds and every error it raises', async () => {
+		const apiKey = 'ak_a1b2c3d4e5f6g7h8i9j0k1l2';
+		const context = makeContext({
+			params: { resource: 'job', operation: 'get', jobId: 'job_a1b2c3d4e5f6' },
+			credentials: { apiKey },
+			responses: [
+				{ statusCode: 401, body: { code: 'unauthenticated', message: 'api key rejected' } },
+			],
+		});
+
+		await assert.rejects(
+			node.execute.call(context as unknown as IExecuteFunctions),
+			(error: Error) => {
+				// The key reaches the wire only through the credential's own
+				// authenticate block, which httpRequestWithAuthentication applies
+				// after the node hands the options over.
+				assert.ok(!JSON.stringify(context.calls).includes(apiKey));
+				assert.ok(!JSON.stringify(error.message).includes(apiKey));
+				assert.ok(
+					!JSON.stringify((error as { description?: string }).description ?? '').includes(apiKey),
+				);
+				assert.ok(!context.logs.join('\n').includes(apiKey));
+				return true;
+			},
+		);
+	});
+});
+
 describe('Job: Get', () => {
 	it('posts the job ID to JobService/Get', async () => {
 		const { context, items } = await run({
@@ -342,6 +409,25 @@ describe('Video: Create From URL', () => {
 		assert.equal(procedureOf(context.calls[0]), 'JobService/List');
 		assert.equal(procedureOf(context.calls[1]), 'VideoService/CreateFromUrl');
 		assert.equal(bodyOf(context, 1).app_id, 'app_discovered');
+	});
+
+	it('discovers the app once for a whole batch of items', async () => {
+		const { context } = await run({
+			params,
+			items: [{ json: {} }, { json: {} }, { json: {} }],
+			responses: [
+				{ body: { jobs: [{ id: 'job_a1b2c3d4e5f6', app_id: 'app_discovered' }], pagination: {} } },
+				{ body: { video: { id: 'vid_1' } } },
+				{ body: { video: { id: 'vid_2' } } },
+				{ body: { video: { id: 'vid_3' } } },
+			],
+		});
+		const lookups = context.calls.filter((call) => procedureOf(call) === 'JobService/List');
+		assert.equal(lookups.length, 1);
+		assert.equal(context.calls.length, 4);
+		for (const call of context.calls.slice(1)) {
+			assert.equal((call.options.body as IDataObject).app_id, 'app_discovered');
+		}
 	});
 
 	it('asks the user for an App ID when nothing can be discovered', async () => {

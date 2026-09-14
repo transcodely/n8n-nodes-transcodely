@@ -17,13 +17,14 @@ import {
 } from './descriptions';
 import type { MetadataPair, OutputSpecInput } from './requests';
 import {
-	backoffDelayMs,
 	buildCreateJobRequest,
 	buildCreateVideoFromUrlRequest,
 	buildListJobsRequest,
 	isTerminalJobStatus,
+	nextPollDelayMs,
 	STALLED_JOB_STATUS,
 } from './requests';
+import type { AppIdCache } from './transport';
 import { getTranscodelyCredentials, resolveAppId, transcodelyApiRequest } from './transport';
 
 const MAX_LIST_PAGES = 100;
@@ -90,6 +91,7 @@ export class Transcodely implements INodeType {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
 		const { baseUrl } = await getTranscodelyCredentials(this);
+		const appIdCache: AppIdCache = {};
 
 		for (let i = 0; i < items.length; i++) {
 			try {
@@ -114,7 +116,7 @@ export class Transcodely implements INodeType {
 				} else if (resource === 'job' && operation === 'wait') {
 					results = [await waitForJob.call(this, i, baseUrl)];
 				} else if (resource === 'video' && operation === 'createFromUrl') {
-					results = [await createVideoFromUrl.call(this, i, baseUrl)];
+					results = [await createVideoFromUrl.call(this, i, baseUrl, appIdCache)];
 				} else if (resource === 'video' && operation === 'get') {
 					const videoId = this.getNodeParameter('videoId', i) as string;
 					const response = await transcodelyApiRequest(
@@ -199,12 +201,13 @@ async function createVideoFromUrl(
 	this: IExecuteFunctions,
 	itemIndex: number,
 	baseUrl: string,
+	appIdCache: AppIdCache,
 ): Promise<IDataObject> {
 	const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
 	const rawTags = typeof options.tags === 'string' ? options.tags : '';
 
 	const body = buildCreateVideoFromUrlRequest({
-		appId: await resolveAppId(this, { itemIndex }),
+		appId: await resolveAppId(this, { itemIndex, cache: appIdCache }),
 		url: this.getNodeParameter('url', itemIndex) as string,
 		title: options.title as string | undefined,
 		description: options.description as string | undefined,
@@ -310,8 +313,8 @@ async function waitForJob(
 			return job;
 		}
 
-		const delay = backoffDelayMs(attempt);
-		if (Date.now() + delay > deadline) {
+		const delay = nextPollDelayMs(attempt, deadline - Date.now());
+		if (delay === null) {
 			throw new NodeOperationError(
 				this.getNode(),
 				`Job ${jobId} did not finish within ${maxWaitSeconds} seconds`,

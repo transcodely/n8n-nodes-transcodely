@@ -34,7 +34,8 @@ export class TranscodelyApi implements ICredentialType {
 			name: 'baseUrl',
 			type: 'string',
 			default: 'https://api.transcodely.com',
-			description: 'Change this only when pointing at a self-hosted or staging Transcodely API',
+			description:
+				'Must be an https:// host with no path. Change it only when pointing at a staging Transcodely API.',
 		},
 		{
 			displayName: 'App ID',
@@ -61,7 +62,36 @@ export class TranscodelyApi implements ICredentialType {
 			baseURL: '={{$credentials.baseUrl}}',
 			url: '/transcodely.v1.JobService/List',
 			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Transcodely-Version': '2026-05-03',
+			},
 			body: { pagination: { limit: 1 } },
 		},
+		rules: [
+			{
+				type: 'responseCode',
+				properties: {
+					value: 401,
+					message: 'The API key was rejected. Check that it is an active ak_ key for this app.',
+				},
+			},
+			{
+				type: 'responseCode',
+				properties: {
+					value: 403,
+					message:
+						'The API key is not allowed to read this app. Check which app the key belongs to.',
+				},
+			},
+			{
+				type: 'responseCode',
+				properties: {
+					value: 404,
+					message:
+						'No Transcodely API was found at this Base URL. Leave the field empty to use https://api.transcodely.com.',
+				},
+			},
+		],
 	};
 }

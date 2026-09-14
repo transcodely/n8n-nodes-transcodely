@@ -94,6 +94,46 @@ export function normalizeBaseUrl(raw?: string): string {
 	return base.replace(/\/+$/, '');
 }
 
+export type BaseUrlCheck = { ok: true; baseUrl: string } | { ok: false; reason: string };
+
+/**
+ * Validates the credential's base URL before any bearer token is sent to it.
+ *
+ * The API key travels as an Authorization header on every request, so the host
+ * it is handed to must be plaintext-proof and must be an API root: a value
+ * carrying a path would silently prefix every procedure and change which
+ * server sees the key.
+ */
+export function validateBaseUrl(raw?: string): BaseUrlCheck {
+	const baseUrl = normalizeBaseUrl(raw);
+
+	if (!baseUrl.startsWith('https://')) {
+		return {
+			ok: false,
+			reason: 'it must start with https:// so the API key is never sent in plaintext',
+		};
+	}
+
+	let parsed: URL;
+	try {
+		parsed = new URL(baseUrl);
+	} catch {
+		return { ok: false, reason: 'it is not a valid URL' };
+	}
+
+	if (parsed.pathname !== '/' && parsed.pathname !== '') {
+		return {
+			ok: false,
+			reason: 'it must be a host with no path, for example https://api.transcodely.com',
+		};
+	}
+	if (parsed.search !== '' || parsed.hash !== '') {
+		return { ok: false, reason: 'it must not carry a query string or fragment' };
+	}
+
+	return { ok: true, baseUrl };
+}
+
 /** Builds the Connect-RPC URL for one procedure. */
 export function rpcUrl(baseUrl: string, service: string, method: string): string {
 	return `${normalizeBaseUrl(baseUrl)}/transcodely.v1.${service}/${method}`;
@@ -289,6 +329,19 @@ export function buildListJobsRequest(params: ListJobsParams): IDataObject {
 	return body;
 }
 
+/**
+ * Collapses a subscription list to what the API should store. Selecting the
+ * wildcard alongside named events makes the named ones redundant, so only the
+ * wildcard is sent.
+ */
+export function normalizeEventSelection(events: string[]): string[] {
+	const cleaned = events.map((event) => event.trim()).filter((event) => event !== '');
+	if (cleaned.includes('*')) {
+		return ['*'];
+	}
+	return [...new Set(cleaned)];
+}
+
 /** Builds a `WebhookService.CreateWebhookEndpoint` request body. */
 export function buildCreateWebhookEndpointRequest(params: {
 	appId: string;
@@ -299,7 +352,7 @@ export function buildCreateWebhookEndpointRequest(params: {
 	const body: IDataObject = {
 		app_id: params.appId,
 		url: params.url,
-		enabled_events: params.events,
+		enabled_events: normalizeEventSelection(params.events),
 	};
 
 	const description = (params.description ?? '').trim();
@@ -329,4 +382,17 @@ export function backoffDelayMs(
 ): number {
 	const delay = initialMs * Math.pow(factor, Math.max(attempt, 0));
 	return Math.min(Math.round(delay), maxMs);
+}
+
+/**
+ * The delay to actually wait before the next poll: the backoff, shortened so
+ * the final poll lands ON the deadline instead of being skipped just short of
+ * it. Returns null only when no time is left, which is the one case that is
+ * genuinely a timeout.
+ */
+export function nextPollDelayMs(attempt: number, msRemaining: number): number | null {
+	if (msRemaining <= 0) {
+		return null;
+	}
+	return Math.min(backoffDelayMs(attempt), msRemaining);
 }

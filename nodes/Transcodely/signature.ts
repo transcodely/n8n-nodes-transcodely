@@ -43,8 +43,11 @@ export function parseSignatureHeader(header: string): {
 	for (const rawPart of header.split(',')) {
 		const part = rawPart.trim();
 		if (part.startsWith('t=')) {
-			const parsed = Number(part.slice(2));
-			timestamp = Number.isInteger(parsed) ? parsed : null;
+			// Digits only, matching the API's strconv.ParseInt(…, 10, 64). Number()
+			// alone would also accept "0x10", "1e9" and "", which the signer can
+			// never produce — the two parsers must agree on what a timestamp is.
+			const raw = part.slice(2);
+			timestamp = /^\d+$/.test(raw) && Number.isSafeInteger(Number(raw)) ? Number(raw) : null;
 		} else if (part.startsWith('v1=')) {
 			signatures.push(part.slice(3));
 		}

@@ -1,7 +1,7 @@
 {
 	"name": "n8n-nodes-transcodely",
 	"version": "0.1.0",
-	"description": "n8n community node for Transcodely — video transcoding and hosting",
+	"description": "n8n community node for Transcodely \u2014 video transcoding and hosting",
 	"license": "MIT",
 	"homepage": "https://github.com/transcodely/n8n-nodes-transcodely#readme",
 	"keywords": [
@@ -34,9 +34,7 @@
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",
 		"scan": "node scripts/scan-source.mjs",
-		"test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
-		"release": "n8n-node release",
-		"prepublishOnly": "n8n-node prerelease"
+		"test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js"
 	},
 	"files": [
 		"dist"

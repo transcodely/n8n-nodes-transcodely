@@ -1,27 +1,28 @@
-# Publishes n8n-nodes-transcodely to npm on every version tag push.
+# Publishes n8n-nodes-transcodely to npm when a version tag is pushed.
 #
-# Since 2026-05-01 n8n requires community nodes to be published through a GitHub
-# Action carrying an npm provenance statement. This workflow satisfies that.
+# Since 2026-05-01 n8n requires community nodes to be published from a GitHub
+# Action carrying an npm provenance statement, which is what `--provenance`
+# plus the `id-token: write` permission below produce.
 #
-# ONE-TIME SETUP (founder):
-#   Option A, recommended — OIDC Trusted Publishing, no long-lived secret:
-#     npmjs.com -> package settings -> Publish access -> Trusted Publishers ->
-#     Add a publisher -> GitHub Actions, owner "transcodely",
-#     repository "n8n-nodes-transcodely", workflow "publish.yml", no environment.
-#     Leave NPM_TOKEN unset.
-#   Option B — npm granular access token with publish rights on this package,
-#     stored as the NPM_TOKEN repository secret.
+# The release itself is prepared locally and this workflow only publishes what
+# the tag points at — see RELEASING.md. Nothing here is interactive, and
+# nothing here bumps a version or creates a tag.
 #
-# RELEASE: run `npm run release` locally. It lints, builds, prompts for the
-# version bump, updates the changelog, commits, tags and pushes the tag, which
-# is what triggers this workflow.
+# ONE-TIME SETUP (maintainer), pick one:
+#   A. Trusted Publishing (recommended, no secret in the repository):
+#      npmjs.com -> the package -> Settings -> Publish access ->
+#      Trusted Publishers -> Add: GitHub Actions, owner "transcodely",
+#      repository "n8n-nodes-transcodely", workflow "publish.yml",
+#      environment blank. Leave NPM_TOKEN unset; npm exchanges the OIDC token.
+#   B. A granular npm access token with publish rights on this package, stored
+#      as the NPM_TOKEN repository secret. Provenance still applies.
 
 name: Publish
 
 on:
   push:
     tags:
-      - '*.*.*'
+      - 'v*.*.*'
 
 jobs:
   publish:
@@ -29,7 +30,8 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      # Required to mint an OIDC token for the npm provenance attestation.
+      # Required to mint the OIDC token npm uses for Trusted Publishing and for
+      # the provenance attestation.
       id-token: write
       contents: read
 
@@ -40,17 +42,41 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
+          registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
+
+      - name: Use an npm that supports Trusted Publishing
+        run: npm install --global npm@latest
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Check the tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Verification scan
+        run: npm run scan
+
       - name: Test
         run: npm test
 
-      - name: Release
+      - name: Build
+        run: npm run build
+
+      - name: Publish
         run: |
-          [ -n "$NPM_TOKEN" ] && npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-          npm run release
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          fi
+          npm publish --provenance --access public
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

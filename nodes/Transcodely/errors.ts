@@ -78,6 +78,21 @@ export function describeApiError(
 	return { code, message, statusCode };
 }
 
+/**
+ * Key under which the API's own error code is stamped onto a NodeApiError's
+ * `context`, so callers can branch on WHICH refusal they got without parsing
+ * the human message.
+ */
+export const ERROR_CODE_CONTEXT_KEY = 'transcodelyErrorCode';
+
+/** True when `error` is a Transcodely API error carrying exactly this code. */
+export function isApiErrorCode(error: unknown, code: string): boolean {
+	if (!(error instanceof NodeApiError)) {
+		return false;
+	}
+	return error.context?.[ERROR_CODE_CONTEXT_KEY] === code;
+}
+
 /** One-line summary suitable for a node error title. */
 export function formatApiError(info: TranscodelyErrorInfo): string {
 	return `Transcodely API error [${info.code}]: ${info.message}`;

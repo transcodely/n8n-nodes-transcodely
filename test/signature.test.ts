@@ -51,6 +51,15 @@ describe('parseSignatureHeader', () => {
 	it('reports a non-numeric timestamp as absent', () => {
 		assert.equal(parseSignatureHeader('t=later,v1=aaa').timestamp, null);
 	});
+
+	it('rejects timestamp spellings the API signer can never produce', () => {
+		// The API writes strconv.FormatInt output and parses with base-10
+		// ParseInt, so hex, exponent and empty forms are not timestamps here
+		// either, however willing JavaScript's Number() is to read them.
+		for (const raw of ['0x10', '1e9', '', ' ', '+1789000000', '1789000000.5', '-1']) {
+			assert.equal(parseSignatureHeader(`t=${raw},v1=aaa`).timestamp, null, raw);
+		}
+	});
 });
 
 describe('verifySignature', () => {

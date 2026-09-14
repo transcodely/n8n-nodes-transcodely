@@ -37,7 +37,7 @@ Create a **Transcodely API** credential.
 | Field | Required | Notes |
 |---|---|---|
 | API Key | yes | An app-scoped key from the Transcodely dashboard, beginning `ak_`. Sent as `Authorization: Bearer …`. |
-| Base URL | no | Defaults to `https://api.transcodely.com`. Change it only for a staging deployment. |
+| Base URL | no | Defaults to `https://api.transcodely.com`. Must be an `https://` host with no path — the API key is sent to it on every request, so a plaintext or path-carrying value is refused before anything is sent. |
 | App ID | no | Looks like `app_xxxxxxxxxx`. Needed by **Create Video From URL** and by the trigger; see below. |
 
 The credential test calls `JobService/List` with a page size of one, so saving it proves the key works without creating anything.
@@ -59,6 +59,8 @@ Submits a transcoding job.
 - **Options** — priority, idempotency key, delayed start and metadata pairs.
 
 Returns the created job. When the job writes to managed storage the response also carries `video_id`.
+
+This node is available to AI Agent nodes as a tool, which means an agent can submit paid encodes without asking first. Set a [monthly spend limit](https://transcodely.com/docs) on the app whose key the agent holds before wiring it up.
 
 ![Create Job](docs/images/create-job.png)
 <!-- screenshot placeholder: the Create Job parameter panel -->
@@ -111,6 +113,8 @@ Every delivery is verified before the workflow runs:
 - anything that fails answers `401` and never starts the workflow.
 
 Both signatures sent during Transcodely's 24-hour secret-rotation overlap are accepted, so a rotation does not drop events.
+
+**Deliveries are at-least-once, and the node does not deduplicate them.** Transcodely can resend an event after a crash or a manual replay, and a delivery captured inside the replay window verifies again. Every delivery carries a unique `webhook-id` header and the same id as `id` in the body, so make the workflow idempotent on it — key whatever you write downstream on that id rather than assuming one event runs the workflow once.
 
 Subscribe to any of the 18 event types, or to `*` for all of them: `job.created`, `job.succeeded`, `job.failed`, `job.canceled`, `job.progress`, `output.created`, `output.ready`, `output.failed`, `output.progress`, `video.uploaded`, `video.ready`, `video.failed`, `video.deleted`, `video.source_scheduled_for_deletion`, `app.created`, `app.updated`, `app.spend_limit_warning`, `app.spend_limit_exceeded`.
 
@@ -165,6 +169,8 @@ npm run build    # tsc + icon copy into dist/
 npm run dev      # run the node against a local n8n
 ```
 
+Releases are cut by hand and published by CI — see [RELEASING.md](RELEASING.md).
+
 Tests use Node's built-in test runner and never reach the network: every HTTP call is answered by a recorded mock, and the signature vectors are computed with `crypto` inside the test.
 
 ## Verification checklist
@@ -172,9 +178,9 @@ Tests use Node's built-in test runner and never reach the network: every HTTP ca
 n8n verification makes the node installable on n8n Cloud. These steps are owned by a maintainer with npm and Creator Portal access:
 
 - [ ] npm account or organization able to publish `n8n-nodes-transcodely`.
-- [ ] Configure publishing: on npmjs.com add a Trusted Publisher for this repository and the `publish.yml` workflow (or store an `NPM_TOKEN` repository secret). Publishing through GitHub Actions with a provenance statement has been mandatory since 2026-05-01.
+- [ ] Configure publishing: on npmjs.com add a Trusted Publisher for this repository and the `publish.yml` workflow, or store an `NPM_TOKEN` repository secret. Publishing through GitHub Actions with a provenance statement has been mandatory since 2026-05-01.
 - [ ] Replace the screenshot placeholders under `docs/images/` with real captures.
-- [ ] First release: `npm run release`, which tags and pushes; the tag triggers `publish.yml`.
+- [ ] Cut the first release by following [RELEASING.md](RELEASING.md). Pushing the `v…` tag is what publishes.
 - [ ] After the release lands, confirm the published package passes the full scan, provenance leg included: `npx @n8n/scan-community-package n8n-nodes-transcodely`.
 - [ ] Submit the package for verification in the n8n Creator Portal. There is no published review SLA.
 
