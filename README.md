@@ -10,6 +10,7 @@ Submit a transcode from a URL or your own bucket, ingest a hosted video in one r
 - [Trigger](#trigger)
 - [Polling instead of webhooks](#polling-instead-of-webhooks)
 - [Error handling](#error-handling)
+- [Screenshots](#screenshots)
 - [Compatibility](#compatibility)
 - [Development](#development)
 - [Verification checklist](#verification-checklist)
@@ -44,9 +45,6 @@ The credential test calls `JobService/List` with a page size of one, so saving i
 
 **About the App ID.** Most calls derive the app from the API key itself. Two of them — creating a hosted video from a URL, and registering a webhook endpoint — still require the app to be named explicitly. When the field is empty the node reads the app from your most recent job; if the account has no jobs yet, that lookup has nothing to read and the node asks you to fill the field in. Filling it in always skips the extra lookup.
 
-![Credential setup](docs/images/credentials.png)
-<!-- screenshot placeholder: the Transcodely API credential form -->
-
 ## Operations
 
 ### Job → Create
@@ -61,9 +59,6 @@ Submits a transcoding job.
 Returns the created job. When the job writes to managed storage the response also carries `video_id`.
 
 This node is available to AI Agent nodes as a tool, which means an agent can submit paid encodes without asking first. Set a [monthly spend limit](https://transcodely.com/docs) on the app whose key the agent holds before wiring it up.
-
-![Create Job](docs/images/create-job.png)
-<!-- screenshot placeholder: the Create Job parameter panel -->
 
 ### Job → Get
 
@@ -83,17 +78,11 @@ Polls `JobService/Get` with exponential backoff — 2 s, then 3 s, 4.5 s and so 
 
 Use the trigger instead of this operation whenever your n8n instance can receive webhooks — polling a long encode burns executions.
 
-![Wait for Completion](docs/images/wait-for-job.png)
-<!-- screenshot placeholder: Wait for Completion wired after Create Job -->
-
 ### Video → Create From URL
 
 Ingests a publicly reachable `http(s)` URL as a hosted video in a single request: title, description, tags, visibility (`public`, `unlisted`, `private`, or the app default), an optional preset, AI captions and hover previews. Transcodely downloads the URL at transcode time; private and internal addresses are refused.
 
 Returns the video in `processing`. Playback and embed URLs appear once it reaches `ready` — subscribe to `video.ready` with the trigger.
-
-![Create Video From URL](docs/images/create-video.png)
-<!-- screenshot placeholder: the Create Video From URL parameter panel -->
 
 ### Video → Get
 
@@ -119,9 +108,6 @@ Both signatures sent during Transcodely's 24-hour secret-rotation overlap are ac
 Activating a workflow whose stored endpoint is missing re-registers it, so deleting the endpoint in the Transcodely dashboard is recoverable. If a stored endpoint is left behind from an earlier activation the node deletes it before registering a replacement; when that delete is refused it logs a warning naming the endpoint and registers anyway, so an orphan can survive and should be removed in the dashboard.
 
 Subscribe to any of the 18 event types, or to `*` for all of them: `job.created`, `job.succeeded`, `job.failed`, `job.canceled`, `job.progress`, `output.created`, `output.ready`, `output.failed`, `output.progress`, `video.uploaded`, `video.ready`, `video.failed`, `video.deleted`, `video.source_scheduled_for_deletion`, `app.created`, `app.updated`, `app.spend_limit_warning`, `app.spend_limit_exceeded`.
-
-![Transcodely Trigger](docs/images/trigger.png)
-<!-- screenshot placeholder: the Transcodely Trigger event selector -->
 
 ### Public HTTPS is required
 
@@ -151,6 +137,10 @@ Codes worth branching on: `limit_exceeded` (the app's monthly spend cap — retr
 
 Enabling **Continue On Fail** puts the message on the item as `error` and lets the workflow proceed.
 
+## Screenshots
+
+This README carries no screenshots yet. They are captured from a real n8n instance and added by the maintainer before the n8n verification submission; `docs/images/README.md` lists the five shots and what each should show.
+
 ## Compatibility
 
 | | |
@@ -179,9 +169,9 @@ Tests use Node's built-in test runner and never reach the network: every HTTP ca
 
 n8n verification makes the node installable on n8n Cloud. These steps are owned by a maintainer with npm and Creator Portal access:
 
-- [ ] npm account or organization able to publish `n8n-nodes-transcodely`.
-- [ ] Configure publishing: on npmjs.com add a Trusted Publisher for this repository and the `publish.yml` workflow, or store an `NPM_TOKEN` repository secret. Publishing through GitHub Actions with a provenance statement has been mandatory since 2026-05-01.
-- [ ] Replace the screenshot placeholders under `docs/images/` with real captures.
+- [ ] npm account or organization able to publish `n8n-nodes-transcodely`. The name was unclaimed on 2026-09-14; re-check with `npm view n8n-nodes-transcodely version` before the release.
+- [ ] Configure publishing. The first release must use an `NPM_TOKEN` secret, because npm's Trusted Publishing is configured on a package page that does not exist until the package does; switch to Trusted Publishing and delete the secret straight after. Exact ordering in [RELEASING.md](RELEASING.md). Publishing through GitHub Actions with a provenance statement has been mandatory since 2026-05-01.
+- [ ] Capture the five screenshots listed in `docs/images/README.md` and add them to the README.
 - [ ] Cut the first release by following [RELEASING.md](RELEASING.md). Pushing the `v…` tag is what publishes.
 - [ ] After the release lands, confirm the published package passes the full scan, provenance leg included: `npx @n8n/scan-community-package n8n-nodes-transcodely`.
 - [ ] Submit the package for verification in the n8n Creator Portal. There is no published review SLA.
